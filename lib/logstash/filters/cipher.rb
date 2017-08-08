@@ -162,6 +162,13 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
           data = data.byteslice(@iv_random_length..data.length)
         end
 
+        if !@auth_tag_length.nil?
+          auth_tag_start = data.length - @auth_tag_length
+          @auth_tag = data.byteslice(auth_tag_start..data.length)
+          data = data.byteslice(0..auth_tag_start)
+          @cipher.auth_tag = @auth_tag
+        end
+
       end
 
       if !@iv_random_length.nil? and @mode == "encrypt"
@@ -176,11 +183,21 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
 
       result = @cipher.update(data) + @cipher.final
 
+      # case of auth tag mismatch: dont reveal plaintext
+      rescue CipherError
+        result = "error: auth tag mismatch" 
+      end
+
       if @mode == "encrypt"
 
-        # if we have a random_iv, prepend that to the crypted result
+        # if we have a random_iv, prepend that to the encrypted result
         if !@random_iv.nil?
           result = @random_iv + result
+        end
+
+        # if we have an auth tag, append that to the encrypted result
+        if !@auth_tag_length.nil?
+          result = result + @cipher.auth_tag
         end
 
         result =  Base64.strict_encode64(result).encode("utf-8") if @base64 == true
